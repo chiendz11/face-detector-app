@@ -22,6 +22,34 @@ def require(value: str, message: str) -> str:
     return value
 
 
+def first_non_empty(*values: str) -> str:
+    for value in values:
+        if value and value.strip():
+            return value.strip()
+    return ""
+
+
+def resolve_sandbox_role_arn(args: argparse.Namespace) -> str:
+    legacy_role = args.role_sandbox_arn.strip()
+    if args.mode == "plan":
+        role = first_non_empty(args.role_sandbox_plan_arn, legacy_role)
+        role_name = "AWS_ROLE_SANDBOX_PLAN_ARN"
+    elif args.mode == "bootstrap":
+        role = first_non_empty(args.role_sandbox_appdeploy_arn, legacy_role)
+        role_name = "AWS_ROLE_SANDBOX_APPDEPLOY_ARN"
+    elif args.action == "destroy":
+        role = first_non_empty(args.role_sandbox_destroy_arn, legacy_role)
+        role_name = "AWS_ROLE_SANDBOX_DESTROY_ARN"
+    else:
+        role = first_non_empty(args.role_sandbox_apply_arn, legacy_role)
+        role_name = "AWS_ROLE_SANDBOX_APPLY_ARN"
+
+    return require(
+        role,
+        f"GitHub secret {role_name} or legacy AWS_ROLE_SANDBOX_ARN must be configured for sandbox {args.mode} runs.",
+    )
+
+
 def short_git_sha(value: str) -> str:
     candidate = re.sub(r"[^0-9a-f]", "", value.lower())
     return candidate[:12]
@@ -253,6 +281,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sandbox-node-max-size", default="2")
     parser.add_argument("--sandbox-node-desired-size", default="1")
     parser.add_argument("--role-sandbox-arn", default="")
+    parser.add_argument("--role-sandbox-plan-arn", default="")
+    parser.add_argument("--role-sandbox-apply-arn", default="")
+    parser.add_argument("--role-sandbox-destroy-arn", default="")
+    parser.add_argument("--role-sandbox-appdeploy-arn", default="")
     parser.add_argument("--role-staging-arn", default="")
     parser.add_argument("--role-production-arn", default="")
     return parser
@@ -315,10 +347,7 @@ def main() -> int:
         node_max_size = input_node_max_size or args.sandbox_node_max_size
         node_desired_size = input_node_desired_size or args.sandbox_node_desired_size
 
-        aws_role_arn = require(
-            args.role_sandbox_arn.strip(),
-            "GitHub secret AWS_ROLE_SANDBOX_ARN or repository variable AWS_ROLE_SANDBOX_ARN must be configured for sandbox runs.",
-        )
+        aws_role_arn = resolve_sandbox_role_arn(args)
         runtime_template_environment = "staging"
         deployment_environment = "sandbox"
         application_template = "deploy/argocd/staging-application.yaml.tpl"
