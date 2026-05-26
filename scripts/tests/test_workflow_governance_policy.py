@@ -69,7 +69,7 @@ class WorkflowGovernancePolicyTest(unittest.TestCase):
         self.assertEqual(nginx_exception["allowed_ports"], [80, 443])
         self.assertTrue(nginx_exception["allow_internet_facing"])
 
-    def test_sandbox_workflow_run_only_signals_pull_request_target_apply(self) -> None:
+    def test_sandbox_workflow_run_can_apply_after_trusted_gate(self) -> None:
         workflow = load_yaml(REPO_ROOT / ".github/workflows/sandbox-auto-apply.yml")
         jobs = workflow["jobs"]
 
@@ -84,11 +84,13 @@ class WorkflowGovernancePolicyTest(unittest.TestCase):
         self.assertIn("ready-for-deploy", signal_script)
 
         for job_name in ("apply-infrastructure", "bootstrap-sandbox", "mark-sandbox-validated"):
-            self.assertIn(
-                "github.event_name == 'pull_request_target'",
-                jobs[job_name]["if"],
-                f"{job_name} must not assume AWS permissions from workflow_run events",
-            )
+            self.assertIn("needs.evaluate-policy.outputs.should_apply == 'true'", jobs[job_name]["if"])
+            self.assertNotIn("github.event_name == 'pull_request_target'", jobs[job_name]["if"])
+
+        gate_script = jobs["evaluate-policy"]["steps"][-1]["with"]["script"]
+        self.assertIn("report.autoApplyEligible", gate_script)
+        self.assertIn("report.deployLabelTrusted", gate_script)
+        self.assertIn("evaluateWorkflowGates(pr.head.sha)", gate_script)
 
 
 if __name__ == "__main__":

@@ -307,12 +307,29 @@ class SandboxRequirementPolicyTest(unittest.TestCase):
 
     def test_workflow_runs_sandbox_requirement_script(self) -> None:
         workflow = load_yaml(REPO_ROOT / ".github/workflows/sandbox-policy.yml")
+        triggers = workflow["on"]
+        self.assertIn("workflow_run", triggers)
+        self.assertIn("Sandbox Auto Apply", triggers["workflow_run"]["workflows"])
+        self.assertIn("completed", triggers["workflow_run"]["types"])
+
         steps = workflow["jobs"]["evaluate"]["steps"]
+
+        context_step = next(
+            step for step in steps if step.get("name") == "Resolve PR context"
+        )
+        self.assertIn("listPullRequestsAssociatedWithCommit", context_step["with"]["script"])
+        self.assertIn("workflow_run", context_step["with"]["script"])
+
+        materialize_step = next(
+            step for step in steps if step.get("name") == "Materialize sandbox policy event"
+        )
+        self.assertIn(".sandbox-policy-event.json", materialize_step["with"]["script"])
 
         evaluate_step = next(
             step for step in steps if step.get("name") == "Evaluate sandbox blast radius policy"
         )
         self.assertIn("scripts/evaluate_sandbox_requirement.py", evaluate_step["run"])
+        self.assertIn("--event-path .sandbox-policy-event.json", evaluate_step["run"])
         self.assertIn("--changed-files-path .sandbox-policy-files", evaluate_step["run"])
         self.assertIn("--label-trust-path .sandbox-policy-label-trust.json", evaluate_step["run"])
 
