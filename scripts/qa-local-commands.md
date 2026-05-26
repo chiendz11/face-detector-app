@@ -1,34 +1,51 @@
-# QA Local Commands (chi tiết)
+# Lệnh QA Local
 
-## 1) Mặc định script chạy những gì?
+Tài liệu này ghi lại các lệnh thường dùng để chạy stack local, chạy smoke test, chạy edge-client, và debug lỗi cơ bản trên máy phát triển.
 
-Script `qa-local-compose.ps1` mặc định dùng 2 file:
+## 1. Script Mặc Định Chạy Gì?
 
-- `docker-compose.yml`
-- `docker-compose.dev.yml`
+Script `scripts/qa-local-compose.ps1` mặc định dùng hai file compose:
 
-Nghĩa là chạy stack local chuẩn (backend, worker, frontend-admin,
-nginx, db, redis, minio...), chưa có edge-client.
+```text
+docker-compose.yml
+docker-compose.dev.yml
+```
 
-## 2) Khi nào edge-client được chạy?
+Nghĩa là script sẽ chạy stack local chuẩn:
 
-Edge-client chỉ được thêm khi có cờ `-IncludeEdge`.
+- backend
+- worker
+- frontend-admin
+- nginx
+- db
+- redis
+- minio
 
-Ví dụ chạy QA có edge-client:
+Mặc định chưa chạy `edge-client`.
+
+## 2. Khi Nào Edge-Client Được Chạy?
+
+Edge-client chỉ được thêm khi dùng cờ:
+
+```powershell
+-IncludeEdge
+```
+
+Chạy QA có edge-client:
 
 ```powershell
 .\scripts\qa-local-compose.ps1 -Action qa -IncludeEdge
 ```
 
-Ví dụ up stack có edge-client:
+Up stack có edge-client:
 
 ```powershell
 .\scripts\qa-local-compose.ps1 -Action up -IncludeEdge
 ```
 
-Bạn không cần mở thêm cửa sổ để chạy edge-client riêng nếu đã dùng `-IncludeEdge` (vì edge-client chạy bằng container từ `docker-compose.edge.yml`).
+Khi đã dùng `-IncludeEdge`, bạn không cần mở thêm cửa sổ riêng để chạy edge-client, vì edge-client sẽ chạy bằng container từ `docker-compose.edge.yml`.
 
-## 3) Bộ lệnh khuyến nghị (dùng script)
+## 3. Bộ Lệnh Khuyến Nghị Bằng Script
 
 Chạy smoke QA local:
 
@@ -42,13 +59,13 @@ Chạy smoke QA local và build image trước khi test:
 .\scripts\qa-local-compose.ps1 -Action qa -Build
 ```
 
-Chạy smoke QA local và build lại sạch (không cache):
+Chạy smoke QA local và build sạch không dùng cache:
 
 ```powershell
 .\scripts\qa-local-compose.ps1 -Action qa -Build -NoCache
 ```
 
-Chạy smoke QA local + edge-client:
+Chạy smoke QA local kèm edge-client:
 
 ```powershell
 .\scripts\qa-local-compose.ps1 -Action qa -IncludeEdge
@@ -102,81 +119,80 @@ Tắt stack:
 .\scripts\qa-local-compose.ps1 -Action down
 ```
 
+## 4. Chạy Edge-Client Local Và Container
 
-## 4) Chạy edge-client: local vs container
+### 4.1. Chạy Trực Tiếp Trên Máy Tính
 
-### a) Chạy edge-client trực tiếp trên máy tính (không container)
+Cách này phù hợp khi bạn đang test camera trên Windows. Container Linux trên Docker Desktop thường không truy cập webcam Windows trực tiếp như `/dev/video0`.
 
-Yêu cầu: đã cài Python và dùng venv riêng cho `edge-client`. Không dùng chung root `.venv` của repo nếu venv đó đã cài security tooling như `semgrep` hoặc `pip-audit`, vì tooling có thể kéo dependency mâu thuẫn với runtime app.
+Nên dùng venv riêng trong thư mục `edge-client`, không dùng chung root `.venv` nếu root venv đã cài tooling như `semgrep` hoặc `pip-audit`.
 
 ```powershell
-# (Từ thư mục gốc repo)
 cd edge-client
 
-# Nếu đang kích hoạt root .venv chung của repo, thoát trước:
 if (Get-Command deactivate -ErrorAction SilentlyContinue) { deactivate }
 
-# Tạo venv riêng cho edge-client. Dùng py -3.13 nếu máy local không có Python 3.11.
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
-# Cài dependencies:
-# (Tùy chọn) .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m pip check
 
-# Test giao diện/camera khi chưa bật backend:
 $env:EDGE_BACKEND_ENABLED = "true"
 $env:EDGE_UI_MODE = "web"
-$env:EDGE_KIOSK_PORT = "8080"  # Dùng 8081 nếu container edge-client đang chiếm 8080.
+$env:EDGE_KIOSK_PORT = "8080"
+$env:API_BASE_URL = "http://localhost"
 
-# Chạy edge-client qua compatibility launcher
 .\.venv\Scripts\python.exe main.py
 ```
 
-Mở kiosk UI ở:
+Mở kiosk UI:
 
 ```text
 http://localhost:8080
 ```
 
-Nếu cần chạy legacy OpenCV window thay vì web kiosk:
+Nếu muốn chạy UI OpenCV cũ:
 
 ```powershell
 $env:EDGE_UI_MODE = "opencv"
 .\.venv\Scripts\python.exe main.py
 ```
 
-Nếu muốn chạy entrypoint package sau khi refactor:
+Nếu muốn chạy bằng package entrypoint:
+
 ```powershell
 .\.venv\Scripts\python.exe -m pip install --no-deps -e .
 .\.venv\Scripts\python.exe -m edge_client
 ```
 
-### b) Chạy edge-client trong container (docker compose)
+### 4.2. Chạy Bằng Container
 
-Edge-client sẽ được up cùng stack khi dùng compose với file `docker-compose.edge.yml`:
+Chạy toàn bộ stack kèm edge-client:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.edge.yml up -d --build
 ```
 
-Hoặc với script:
+Hoặc dùng script:
+
 ```powershell
-./scripts/qa-local-compose.ps1 -Action up -IncludeEdge
+.\scripts\qa-local-compose.ps1 -Action up -IncludeEdge
 ```
 
-Để chỉ restart edge-client container:
+Restart riêng edge-client container:
+
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.edge.yml restart edge-client
 ```
 
-Để xem log edge-client:
+Xem log edge-client:
+
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.edge.yml logs -f edge-client
 ```
 
-## 5) Health check đúng endpoint
+## 5. Health Check Đúng Endpoint
 
 Up local stack:
 
@@ -184,7 +200,7 @@ Up local stack:
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-Up local stack + edge-client:
+Up local stack kèm edge-client:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.edge.yml up -d --build
@@ -202,14 +218,11 @@ Xem log:
 docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
 ```
 
-Down local stack:
+Tắt local stack:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.edge.yml down --remove-orphans
 ```
-
-
-## 5) Health check đúng endpoint
 
 Backend root health qua nginx:
 
@@ -232,23 +245,28 @@ Invoke-WebRequest http://localhost/admin/
 Enrollment compatibility redirect:
 
 ```powershell
-Invoke-WebRequest http://localhost/admin/
+Invoke-WebRequest http://localhost/enroll/
 ```
 
-## 6) Troubleshooting khi `-Action qa` bị timeout
+## 6. Troubleshooting Khi `-Action qa` Bị Timeout
 
 Nếu script báo timeout ở `http://localhost/health`, nguyên nhân thường là backend chưa start thành công dù container đang `Up`.
 
-Quy trình kiểm tra nhanh:
+Kiểm tra nhanh:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
 docker compose -f docker-compose.yml -f docker-compose.dev.yml logs backend --tail 100
 ```
 
-Lỗi hay gặp: backend văng do mismatch dependency (ví dụ `numpy` và `opencv-python`).
+Lỗi hay gặp:
 
-Khi gặp trường hợp này, ưu tiên build lại image rồi chạy QA:
+- dependency mismatch, ví dụ `numpy` và `opencv-python`
+- migration chưa chạy
+- biến môi trường thiếu hoặc sai
+- backend fail khi import DeepFace/runtime dependency
+
+Ưu tiên build lại image rồi chạy QA:
 
 ```powershell
 .\scripts\qa-local-compose.ps1 -Action qa -Build
@@ -260,13 +278,11 @@ Nếu vẫn lỗi, build sạch:
 .\scripts\qa-local-compose.ps1 -Action qa -Build -NoCache
 ```
 
-## 7) Manual E2E: enroll face rồi verify qua edge
+## 7. Manual E2E: Enroll Face Rồi Verify Qua Edge
 
-Flow này dùng frontend-admin để tạo vector thật trong Postgres/pgvector, sau đó
-edge-client gửi face crop về backend để verify.
+Flow này dùng frontend-admin để tạo dữ liệu khuôn mặt thật trong Postgres/pgvector. Sau đó edge-client gửi face crop về backend để verify.
 
-Trước khi chạy, đảm bảo file `.env` local đang dùng cùng model contract với
-`.env.example`:
+Trước khi chạy, đảm bảo `.env` local dùng đúng model contract:
 
 ```env
 EMBEDDING_PROVIDER=deepface
@@ -286,9 +302,7 @@ Chạy stack server:
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-Chạy migration. Migration đổi `face_embeddings.embedding` sang `vector(512)` sẽ
-fail nếu bảng đã có embedding cũ; khi local test chưa có dữ liệu, migration sẽ
-đi qua bình thường.
+Chạy migration:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.dev.yml exec backend alembic upgrade head
@@ -300,19 +314,18 @@ Mở admin UI:
 http://localhost/admin/
 ```
 
-Mở admin enrollment session UI:
+Production lưu ý: browser chỉ cho camera trên HTTPS hoặc `localhost`. Vì vậy enrollment bằng camera trong production phải chạy qua HTTPS.
 
-```text
-http://localhost/admin/
-```
+Flow test:
 
-Lưu ý production: admin enrollment session phải chạy qua HTTPS để browser cho phép
-truy cập camera. `localhost` chỉ là ngoại lệ cho dev/test local.
+1. Login vào admin UI bằng user/password trong `.env`.
+2. Tạo employee hoặc chọn employee đã có.
+3. Vào khu enrollment.
+4. Chụp 3-5 mẫu mặt live.
+5. Save enrollment để backend tạo embedding/vector.
+6. Dùng edge-client hoặc API recognition để verify.
 
-Login bằng user/password trong `.env`, tạo employee ở admin UI, rồi dùng
-admin enrollment session để chụp 3-5 mẫu mặt live cho employee đó.
-
-Kiểm tra vector đã được ghi:
+Kiểm tra vector đã ghi:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.dev.yml exec db psql -U postgres -d face_detector -c "select employee_code, created_at from face_embeddings;"

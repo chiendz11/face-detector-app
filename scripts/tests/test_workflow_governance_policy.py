@@ -57,6 +57,18 @@ class WorkflowGovernancePolicyTest(unittest.TestCase):
         self.assertIn("--policy policies/github/workflows", validate_step["run"])
         self.assertIn("--data policies/data", validate_step["run"])
 
+    def test_nginx_public_service_exception_allows_http_and_https_only(self) -> None:
+        data = load_yaml(REPO_ROOT / "policies/data/exceptions.yaml")
+        public_services = data["exceptions"]["kubernetes"]["public_services"]
+
+        nginx_exception = next(
+            entry for entry in public_services if entry["resource_name"] == "nginx"
+        )
+
+        self.assertEqual(nginx_exception["service_types"], ["LoadBalancer"])
+        self.assertEqual(nginx_exception["allowed_ports"], [80, 443])
+        self.assertTrue(nginx_exception["allow_internet_facing"])
+
     def test_sandbox_workflow_run_only_signals_pull_request_target_apply(self) -> None:
         workflow = load_yaml(REPO_ROOT / ".github/workflows/sandbox-auto-apply.yml")
         jobs = workflow["jobs"]
