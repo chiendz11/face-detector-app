@@ -1,0 +1,11 @@
+route:
+  receiver: local-null
+  group_by:
+    - alertname
+    - env
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 1h
+
+receivers:
+  - name: local-null

@@ -1,0 +1,54 @@
+groups:
+  - name: face-detector.local
+    rules:
+      - alert: LocalFaceDetectorBackendDown
+        expr: >-
+          absent(up{job="face-detector-backend"})
+          or min(up{job="face-detector-backend"}) == 0
+        for: 1m
+        labels:
+          severity: warning
+          env: local
+        annotations:
+          summary: Local Face Detector backend is not scrapeable
+          description: Prometheus cannot scrape backend /metrics in the local compose stack.
+
+      - alert: LocalFaceDetectorHighErrorRate
+        expr: >-
+          sum(rate(face_detector_http_requests_total{namespace="local", status_code=~"5.."}[5m]))
+          / clamp_min(sum(rate(face_detector_http_requests_total{namespace="local"}[5m])), 0.001)
+          > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          env: local
+        annotations:
+          summary: Local Face Detector backend has a high 5xx rate
+          description: More than 5 percent of local backend requests returned 5xx for 2 minutes.
+
+      - alert: LocalFaceDetectorHighLatencyP95
+        expr: >-
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(face_detector_http_request_duration_seconds_bucket{namespace="local"}[5m])
+            )
+          ) > 2
+        for: 2m
+        labels:
+          severity: warning
+          env: local
+        annotations:
+          summary: Local Face Detector backend p95 latency is high
+          description: Local backend p95 HTTP latency stayed above 2 seconds for 2 minutes.
+
+      - alert: LocalFaceDetectorDependencyUnhealthy
+        expr: >-
+          min(face_detector_dependency_health_status{namespace="local"}) < 1
+        for: 1m
+        labels:
+          severity: warning
+          env: local
+        annotations:
+          summary: Local Face Detector dependency is unhealthy
+          description: Backend readiness reported an unhealthy local dependency.
