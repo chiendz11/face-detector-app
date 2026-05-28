@@ -1,0 +1,32 @@
+services:
+  loki:
+    image: grafana/loki:${LOKI_IMAGE_TAG:-3.5.8}
+    restart: unless-stopped
+    command:
+      - "-config.file=/etc/loki/loki.yml"
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./logging/local/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+
+  alloy:
+    image: grafana/alloy:${ALLOY_IMAGE_TAG:-v1.16.1}
+    restart: unless-stopped
+    depends_on:
+      - loki
+    command:
+      - "run"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+      - "--storage.path=/var/lib/alloy/data"
+      - "/etc/alloy/config.alloy"
+    ports:
+      - "${ALLOY_PORT:-12345}:12345"
+    volumes:
+      - ./logging/local/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy_data:/var/lib/alloy/data
+
+volumes:
+  loki_data:
+  alloy_data:

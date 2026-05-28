@@ -1,0 +1,61 @@
+discovery.docker "compose" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "face_detector_compose" {
+  targets = discovery.docker.compose.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "face_detector"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_id"]
+    target_label  = "container_id"
+  }
+
+  rule {
+    target_label = "namespace"
+    replacement  = "local"
+  }
+
+  rule {
+    target_label = "env"
+    replacement  = "local"
+  }
+
+  rule {
+    target_label = "app"
+    replacement  = "face-detector"
+  }
+}
+
+loki.source.docker "face_detector_compose" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.face_detector_compose.output
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
