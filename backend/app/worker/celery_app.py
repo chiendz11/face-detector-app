@@ -2,6 +2,9 @@ from celery import Celery
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.core.config import settings
+from app.utils.structured_logging import configure_logging
+
+configure_logging(settings.log_level)
 
 
 def _normalize_redis_ssl_url(redis_url: str) -> str:

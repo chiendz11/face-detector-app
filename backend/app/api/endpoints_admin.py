@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 
 from app.api.dependencies import (
@@ -36,8 +38,10 @@ from app.services.employee_registry import EmployeeRegistryService
 from app.services.enrollment_session_service import EnrollmentSessionService
 from app.services.recognition_log_service import RecognitionLogService
 from app.services.vector_search_service import VectorSearchService
+from app.utils.structured_logging import log_event
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/health")
@@ -747,10 +751,35 @@ def _record_audit(
     resource_id: str | None = None,
     metadata: dict | None = None,
 ) -> None:
-    audit_log.record_event(
+    try:
+        audit_log.record_event(
+            actor=actor,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            metadata=metadata,
+        )
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            "audit_event_record_failed",
+            actor=actor,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            error_type=type(exc).__name__,
+            error=exc,
+        )
+        raise
+
+    log_event(
+        logger,
+        logging.INFO,
+        "audit_event_recorded",
         actor=actor,
         action=action,
         resource_type=resource_type,
         resource_id=resource_id,
-        metadata=metadata,
+        metadata_keys=sorted((metadata or {}).keys()),
     )

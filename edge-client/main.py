@@ -4,12 +4,11 @@ from pathlib import Path
 import sys
 
 
-SRC_ROOT = Path(__file__).resolve().parent / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+ROOT_SRC = Path(__file__).resolve().parent / "src"
+if str(ROOT_SRC) not in sys.path:
+    sys.path.insert(0, str(ROOT_SRC))
 
 from edge_client.app import main
-
 
 if __name__ == "__main__":
     main()

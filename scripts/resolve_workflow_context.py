@@ -364,12 +364,18 @@ def main() -> int:
         if pull_request_number is None:
             ssm_environment_key = f"admin/{admin_owner_path}/{admin_branch_path}"
             param_prefix = f"/facedetector/{ssm_environment_key}"
-            terraform_state_key = f"admin-previews/{admin_owner_path}/{admin_branch_path}/terraform.tfstate"
+            network_state_key = f"admin-previews/{admin_owner_path}/{admin_branch_path}/network.tfstate"
+            cluster_state_key = f"admin-previews/{admin_owner_path}/{admin_branch_path}/cluster.tfstate"
+            data_state_key = f"admin-previews/{admin_owner_path}/{admin_branch_path}/data.tfstate"
+            platform_state_key = f"admin-previews/{admin_owner_path}/{admin_branch_path}/platform.tfstate"
             ssm_state_key = f"admin-previews/{admin_owner_path}/{admin_branch_path}/ssm.tfstate"
         else:
             ssm_environment_key = f"sandbox/{sandbox_key}"
             param_prefix = f"/facedetector/{ssm_environment_key}"
-            terraform_state_key = f"sandboxes/{sandbox_key}/terraform.tfstate"
+            network_state_key = f"sandboxes/{sandbox_key}/network.tfstate"
+            cluster_state_key = f"sandboxes/{sandbox_key}/cluster.tfstate"
+            data_state_key = f"sandboxes/{sandbox_key}/data.tfstate"
+            platform_state_key = f"sandboxes/{sandbox_key}/platform.tfstate"
             ssm_state_key = f"sandboxes/{sandbox_key}/ssm.tfstate"
     else:
         if args.environment == "production":
@@ -445,7 +451,10 @@ def main() -> int:
             git_sha,
             release_tag,
         )
-        terraform_state_key = f"eks/{cluster_name}.tfstate"
+        network_state_key = f"network/{cluster_name}.tfstate"
+        cluster_state_key = f"cluster/{cluster_name}.tfstate"
+        data_state_key = f"data/{cluster_name}.tfstate"
+        platform_state_key = f"platform/{cluster_name}.tfstate"
         ssm_state_key = f"ssm/{args.environment}.tfstate"
 
     outputs = {
@@ -459,7 +468,10 @@ def main() -> int:
         "owner_login": owner_login,
         "environment_identity": environment_identity,
         "env_version": env_version,
-        "terraform_state_key": terraform_state_key,
+        "network_state_key": network_state_key,
+        "cluster_state_key": cluster_state_key,
+        "data_state_key": data_state_key,
+        "platform_state_key": platform_state_key,
         "ssm_state_key": ssm_state_key,
         "snapshot_bucket_name": snapshot_bucket_name,
         "node_instance_type": node_instance_type,

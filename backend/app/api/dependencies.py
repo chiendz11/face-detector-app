@@ -1,4 +1,5 @@
 from functools import lru_cache
+import logging
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -16,8 +17,10 @@ from app.services.minio_service import MinioService
 from app.services.recognition_log_service import RecognitionLogService
 from app.services.vector_search_service import VectorSearchService
 from app.services.recognition_service import RecognitionService
+from app.utils.structured_logging import log_event
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.api_prefix}/auth/login")
+logger = logging.getLogger(__name__)
 
 
 def get_audit_log_service(db: Session = Depends(get_db)) -> AuditLogService:
@@ -101,6 +104,13 @@ def get_current_user(
     try:
         return auth_service.verify_token(token)
     except ValueError as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            "auth_token_rejected",
+            error_type=type(exc).__name__,
+            error=exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),

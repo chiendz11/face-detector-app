@@ -70,7 +70,7 @@ class SandboxRequirementPolicyTest(unittest.TestCase):
     def test_heavy_infra_pr_without_label_fails(self) -> None:
         report = evaluate_policy(
             make_event(),
-            ["terraform/eks/main.tf"],
+            ["terraform/cluster/main.tf"],
         )
 
         self.assertEqual(report["classification"], "heavy")
@@ -134,7 +134,7 @@ class SandboxRequirementPolicyTest(unittest.TestCase):
     def test_untrusted_deploy_label_does_not_clear_governance_block(self) -> None:
         report = evaluate_policy(
             make_event(labels=["deploy-sandbox"]),
-            ["terraform/eks/main.tf"],
+            ["terraform/cluster/main.tf"],
             label_trust=untrusted_labels("deploy-sandbox"),
         )
 
@@ -147,7 +147,7 @@ class SandboxRequirementPolicyTest(unittest.TestCase):
     def test_critical_path_with_deploy_label_runs_apply_but_still_blocks_merge(self) -> None:
         report = evaluate_policy(
             make_event(labels=["deploy-sandbox"]),
-            ["terraform/eks/main.tf"],
+            ["terraform/cluster/main.tf"],
             label_trust=trusted_labels("deploy-sandbox"),
         )
 
@@ -159,7 +159,7 @@ class SandboxRequirementPolicyTest(unittest.TestCase):
     def test_critical_path_with_sandbox_validation_passes(self) -> None:
         report = evaluate_policy(
             make_event(labels=["sandbox-validated"]),
-            ["terraform/eks/main.tf"],
+            ["terraform/cluster/main.tf"],
             label_trust=trusted_labels("sandbox-validated", actor="github-actions[bot]"),
         )
 
@@ -172,7 +172,7 @@ class SandboxRequirementPolicyTest(unittest.TestCase):
     def test_critical_path_with_owner_waiver_passes(self) -> None:
         report = evaluate_policy(
             make_event(labels=["skip-sandbox-approved"]),
-            ["terraform/eks/main.tf"],
+            ["terraform/cluster/main.tf"],
             label_trust=trusted_labels("skip-sandbox-approved"),
         )
 
@@ -185,7 +185,7 @@ class SandboxRequirementPolicyTest(unittest.TestCase):
     def test_critical_path_self_approve_still_requires_sandbox_label(self) -> None:
         report = evaluate_policy(
             make_event(labels=["allow-self-approve"]),
-            ["terraform/eks/main.tf"],
+            ["terraform/cluster/main.tf"],
             codeowners={"*": ["chiendz11"]},
             allow_self_approve=True,
             label_trust=trusted_labels("allow-self-approve"),

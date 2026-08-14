@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     admin_username: str = "admin"
     admin_password: str = "admin"
+    log_level: str = "INFO"
 
     model_config = SettingsConfigDict(
         env_file=".env",

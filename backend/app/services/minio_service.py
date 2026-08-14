@@ -1,4 +1,6 @@
+import logging
 import mimetypes
+from time import perf_counter
 from urllib.parse import quote
 
 try:
@@ -7,6 +9,9 @@ except ImportError:  # pragma: no cover
     boto3 = None
 
 from app.utils.resilience import CircuitBreaker, retry_operation
+from app.utils.structured_logging import log_event
+
+logger = logging.getLogger(__name__)
 
 
 class MinioService:
@@ -64,13 +69,51 @@ class MinioService:
         if not image_bytes:
             raise ValueError("image_bytes must not be empty")
 
-        if self.aws_s3_bucket:
-            return self._upload_to_s3(normalized_name, image_bytes)
+        start = perf_counter()
+        storage_mode = self._storage_mode()
+        log_event(
+            logger,
+            logging.INFO,
+            "snapshot_upload_started",
+            storage_mode=storage_mode,
+            bucket=self.aws_s3_bucket or self.bucket_name,
+            object_name=normalized_name,
+            image_size_bytes=len(image_bytes),
+        )
 
-        if self.use_s3_api:
-            return self._upload_to_local_s3(normalized_name, image_bytes)
+        try:
+            if self.aws_s3_bucket:
+                snapshot_url = self._upload_to_s3(normalized_name, image_bytes)
+            elif self.use_s3_api:
+                snapshot_url = self._upload_to_local_s3(normalized_name, image_bytes)
+            else:
+                snapshot_url = self._upload_to_local(normalized_name, image_bytes)
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.ERROR,
+                "snapshot_upload_failed",
+                storage_mode=storage_mode,
+                bucket=self.aws_s3_bucket or self.bucket_name,
+                object_name=normalized_name,
+                image_size_bytes=len(image_bytes),
+                error_type=type(exc).__name__,
+                error=exc,
+                duration_ms=round((perf_counter() - start) * 1000, 3),
+            )
+            raise
 
-        return self._upload_to_local(normalized_name, image_bytes)
+        log_event(
+            logger,
+            logging.INFO,
+            "snapshot_upload_completed",
+            storage_mode=storage_mode,
+            bucket=self.aws_s3_bucket or self.bucket_name,
+            object_name=normalized_name,
+            image_size_bytes=len(image_bytes),
+            duration_ms=round((perf_counter() - start) * 1000, 3),
+        )
+        return snapshot_url
 
     def _upload_to_local(self, normalized_name: str, image_bytes: bytes) -> str:
         self._uploaded_objects[normalized_name] = image_bytes
@@ -153,6 +196,13 @@ class MinioService:
             client.head_bucket(Bucket=bucket_name)
         except Exception:
             client.create_bucket(Bucket=bucket_name)
+            log_event(
+                logger,
+                logging.INFO,
+                "snapshot_bucket_created",
+                bucket=bucket_name,
+                storage_mode="local_s3",
+            )
 
         self._bucket_initialized = True
 
@@ -162,3 +212,10 @@ class MinioService:
         if normalized.startswith(("http://", "https://")):
             return normalized
         return f"http://{normalized}"
+
+    def _storage_mode(self) -> str:
+        if self.aws_s3_bucket:
+            return "aws_s3"
+        if self.use_s3_api:
+            return "local_s3"
+        return "local_memory"

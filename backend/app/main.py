@@ -1,3 +1,4 @@
+import logging
 from time import perf_counter
 
 from fastapi import FastAPI, Request, Response
@@ -11,6 +12,10 @@ from app.api.endpoints_auth import router as auth_router
 from app.api.endpoints_vision import router as vision_router
 from app.core.config import settings
 from app.db import engine
+from app.utils.structured_logging import configure_logging, log_event
+
+configure_logging(settings.log_level)
+logger = logging.getLogger(__name__)
 
 HTTP_REQUESTS_TOTAL = Counter(
     "face_detector_http_requests_total",
@@ -67,6 +72,16 @@ async def collect_http_metrics(request: Request, call_next):
             HTTP_ERRORS_TOTAL.labels(request.method, path, status_code).inc()
         HTTP_REQUEST_DURATION_SECONDS.labels(request.method, path, status_code).observe(duration)
         HTTP_REQUESTS_IN_PROGRESS.dec()
+        log_event(
+            logger,
+            logging.ERROR if status_code.startswith("5") else logging.INFO,
+            "http_request_completed",
+            method=request.method,
+            path=path,
+            status_code=status_code,
+            duration_ms=round(duration * 1000, 3),
+            client_host=request.client.host if request.client else None,
+        )
 
 
 app.include_router(admin_router, prefix=settings.api_prefix)
@@ -105,6 +120,12 @@ def readiness():
     }
     if healthy:
         return payload
+    log_event(
+        logger,
+        logging.WARNING,
+        "readiness_failed",
+        dependencies=checks,
+    )
     return JSONResponse(payload, status_code=503)
 
 
@@ -118,7 +139,14 @@ def _check_database() -> bool:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         return True
-    except Exception:
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            "database_health_check_failed",
+            error_type=type(exc).__name__,
+            error=exc,
+        )
         return False
 
 
@@ -130,5 +158,12 @@ def _check_redis() -> bool:
             socket_timeout=1,
         )
         return bool(client.ping())
-    except Exception:
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.WARNING,
+            "redis_health_check_failed",
+            error_type=type(exc).__name__,
+            error=exc,
+        )
         return False

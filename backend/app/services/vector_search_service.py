@@ -1,4 +1,6 @@
+import logging
 from math import sqrt
+from time import perf_counter
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -6,6 +8,9 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.db_models import FaceEmbedding
 from app.utils.resilience import CircuitBreaker, retry_operation
+from app.utils.structured_logging import log_event
+
+logger = logging.getLogger(__name__)
 
 DB_CIRCUIT_BREAKER = CircuitBreaker(
     failure_threshold=settings.db_circuit_failure_threshold,
@@ -58,6 +63,7 @@ class VectorSearchService:
                 .filter(FaceEmbedding.employee_code == normalized_code)
                 .first()
             )
+            action = "created" if existing is None else "updated"
             if existing is None:
                 existing = FaceEmbedding(
                     employee_code=normalized_code,
@@ -77,9 +83,29 @@ class VectorSearchService:
                 self.db.commit()
 
             DB_CIRCUIT_BREAKER.call(attempt_commit)
+            log_event(
+                logger,
+                logging.INFO,
+                "face_embedding_upserted",
+                storage="database",
+                action=action,
+                employee_code=normalized_code,
+                embedding_dimensions=len(embedding),
+                metadata_keys=sorted((metadata or {}).keys()),
+            )
             return payload
 
         self._stored_embeddings[normalized_code] = payload
+        log_event(
+            logger,
+            logging.INFO,
+            "face_embedding_upserted",
+            storage="memory",
+            action="upserted",
+            employee_code=normalized_code,
+            embedding_dimensions=len(embedding),
+            metadata_keys=sorted((metadata or {}).keys()),
+        )
         return payload
 
     def delete_face_embedding(self, employee_code: str) -> bool:
@@ -94,6 +120,13 @@ class VectorSearchService:
                 .first()
             )
             if existing is None:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "face_embedding_delete_miss",
+                    storage="database",
+                    employee_code=normalized_code,
+                )
                 return False
 
             self.db.delete(existing)
@@ -106,12 +139,28 @@ class VectorSearchService:
                 self.db.commit()
 
             DB_CIRCUIT_BREAKER.call(attempt_commit)
+            log_event(
+                logger,
+                logging.INFO,
+                "face_embedding_deleted",
+                storage="database",
+                employee_code=normalized_code,
+            )
             return True
 
-        return self._stored_embeddings.pop(normalized_code, None) is not None
+        deleted = self._stored_embeddings.pop(normalized_code, None) is not None
+        log_event(
+            logger,
+            logging.INFO,
+            "face_embedding_deleted" if deleted else "face_embedding_delete_miss",
+            storage="memory",
+            employee_code=normalized_code,
+        )
+        return deleted
 
     def search_similar_face(self, embedding: list[float]) -> dict:
         self._validate_embedding(embedding)
+        start = perf_counter()
 
         if self.read_db is not None:
             def query_best_match() -> dict:
@@ -127,12 +176,44 @@ class VectorSearchService:
                 )
                 row = self.read_db.execute(statement).first()
                 if row is None:
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        "vector_search_completed",
+                        storage="database",
+                        matched=False,
+                        score=0.0,
+                        match_threshold=self.match_threshold,
+                        duration_ms=round((perf_counter() - start) * 1000, 3),
+                    )
                     return {"match": None, "score": 0.0, "metadata": None}
 
                 confidence = round(max(0.0, 1.0 - float(row.distance)), 6)
                 if confidence < self.match_threshold:
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        "vector_search_completed",
+                        storage="database",
+                        matched=False,
+                        best_candidate=row.employee_code,
+                        score=confidence,
+                        match_threshold=self.match_threshold,
+                        duration_ms=round((perf_counter() - start) * 1000, 3),
+                    )
                     return {"match": None, "score": 0.0, "metadata": None}
 
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "vector_search_completed",
+                    storage="database",
+                    matched=True,
+                    employee_code=row.employee_code,
+                    score=confidence,
+                    match_threshold=self.match_threshold,
+                    duration_ms=round((perf_counter() - start) * 1000, 3),
+                )
                 return {
                     "match": row.employee_code,
                     "score": confidence,
@@ -147,6 +228,16 @@ class VectorSearchService:
             )
 
         if not self._stored_embeddings:
+            log_event(
+                logger,
+                logging.INFO,
+                "vector_search_completed",
+                storage="memory",
+                matched=False,
+                score=0.0,
+                match_threshold=self.match_threshold,
+                duration_ms=round((perf_counter() - start) * 1000, 3),
+            )
             return {"match": None, "score": 0.0, "metadata": None}
 
         best_match: dict | None = None
@@ -159,8 +250,30 @@ class VectorSearchService:
                 best_match = payload
 
         if best_match is None or best_score < self.match_threshold:
+            log_event(
+                logger,
+                logging.INFO,
+                "vector_search_completed",
+                storage="memory",
+                matched=False,
+                best_candidate=best_match["employee_code"] if best_match else None,
+                score=round(max(best_score, 0.0), 6),
+                match_threshold=self.match_threshold,
+                duration_ms=round((perf_counter() - start) * 1000, 3),
+            )
             return {"match": None, "score": round(max(best_score, 0.0), 6), "metadata": None}
 
+        log_event(
+            logger,
+            logging.INFO,
+            "vector_search_completed",
+            storage="memory",
+            matched=True,
+            employee_code=best_match["employee_code"],
+            score=round(best_score, 6),
+            match_threshold=self.match_threshold,
+            duration_ms=round((perf_counter() - start) * 1000, 3),
+        )
         return {
             "match": best_match["employee_code"],
             "score": round(best_score, 6),

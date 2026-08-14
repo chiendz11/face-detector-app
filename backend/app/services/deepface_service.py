@@ -1,6 +1,7 @@
 import logging
 import os
 from hashlib import sha256
+from time import perf_counter
 from typing import Any
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
@@ -13,9 +14,11 @@ except ImportError:  # pragma: no cover
     np = None
 
 from app.core.config import MODEL_EMBEDDING_DIMENSIONS, settings
+from app.utils.structured_logging import log_event
 
 logger = logging.getLogger(__name__)
 DeepFace: Any | None = None
+
 
 class DeepFaceService:
     def __init__(
@@ -57,21 +60,89 @@ class DeepFaceService:
         if not image_bytes:
             raise ValueError("image_bytes must not be empty")
 
+        start = perf_counter()
+        effective_enforce_detection = (
+            self.enforce_detection
+            if enforce_detection is None
+            else enforce_detection
+        )
+        log_event(
+            logger,
+            logging.INFO,
+            "face_embedding_started",
+            provider=self.provider,
+            model_name=self.model_name,
+            detector_backend=self.detector_backend,
+            align=self.align,
+            enforce_detection=effective_enforce_detection,
+            image_size_bytes=len(image_bytes),
+        )
+
         if self.provider == "hash":
-            return self._hash_embedding(image_bytes)
+            embedding = self._hash_embedding(image_bytes)
+            log_event(
+                logger,
+                logging.INFO,
+                "face_embedding_completed",
+                provider=self.provider,
+                embedding_dimensions=len(embedding),
+                duration_ms=round((perf_counter() - start) * 1000, 3),
+            )
+            return embedding
 
         try:
-            return self._deepface_embedding(image_bytes, enforce_detection=enforce_detection)
-        except ValueError:
+            embedding = self._deepface_embedding(image_bytes, enforce_detection=enforce_detection)
+            log_event(
+                logger,
+                logging.INFO,
+                "face_embedding_completed",
+                provider=self.provider,
+                model_name=self.model_name,
+                detector_backend=self.detector_backend,
+                embedding_dimensions=len(embedding),
+                duration_ms=round((perf_counter() - start) * 1000, 3),
+            )
+            return embedding
+        except ValueError as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "face_embedding_rejected",
+                provider=self.provider,
+                model_name=self.model_name,
+                detector_backend=self.detector_backend,
+                error_type=type(exc).__name__,
+                error=exc,
+                duration_ms=round((perf_counter() - start) * 1000, 3),
+            )
             raise
         except Exception as exc:
             if self.allow_hash_fallback:
-                logger.warning(
-                    "DeepFace embedding failed; falling back to hashed embedding because "
-                    "EMBEDDING_ALLOW_HASH_FALLBACK is enabled: %s",
-                    exc,
+                embedding = self._hash_embedding(image_bytes)
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "face_embedding_fallback_to_hash",
+                    provider=self.provider,
+                    model_name=self.model_name,
+                    detector_backend=self.detector_backend,
+                    embedding_dimensions=len(embedding),
+                    error_type=type(exc).__name__,
+                    error=exc,
+                    duration_ms=round((perf_counter() - start) * 1000, 3),
                 )
-                return self._hash_embedding(image_bytes)
+                return embedding
+            log_event(
+                logger,
+                logging.ERROR,
+                "face_embedding_failed",
+                provider=self.provider,
+                model_name=self.model_name,
+                detector_backend=self.detector_backend,
+                error_type=type(exc).__name__,
+                error=exc,
+                duration_ms=round((perf_counter() - start) * 1000, 3),
+            )
             raise RuntimeError(
                 "DeepFace embedding failed. Check model dependencies, model download "
                 "access, image validity, and EMBEDDING_DIMENSIONS."
@@ -180,4 +251,5 @@ def _load_deepface() -> Any:
         raise RuntimeError("deepface is not installed") from exc
 
     DeepFace = deepface_client
+    log_event(logger, logging.INFO, "deepface_client_loaded")
     return DeepFace
