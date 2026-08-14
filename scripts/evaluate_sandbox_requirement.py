@@ -17,14 +17,11 @@ SANDBOX_RECOMMENDED_LABEL = "sandbox-recommended"
 SANDBOX_REQUIRED_LABEL = "sandbox-required"
 SANDBOX_VALIDATED_LABEL = "sandbox-validated"
 HEAVY_REASON_PATTERNS = {
-    "Touches infrastructure, deployment, workflow, policy, or ingress control paths": [
+    "Touches application workflow, policy, or ingress control paths": [
         ".github/actions/**",
         ".github/workflows/**",
-        "aws/**",
-        "deploy/**",
         "nginx/**",
         "policies/**",
-        "terraform/**",
     ],
     "Touches shared runtime or release contract files": [
         ".github/CODEOWNERS",
@@ -41,12 +38,8 @@ HEAVY_REASON_PATTERNS = {
         "nginx/Dockerfile",
         "scripts/ci-e2e-test.sh",
         "scripts/ci-integration-test.sh",
-        "scripts/cleanup_sandbox_aws_orphans.py",
-        "scripts/generate-env-from-ssm.sh",
         "scripts/render_sandbox_status_comment.py",
         "scripts/resolve_registry_digest.py",
-        "scripts/resolve_workflow_context.py",
-        "scripts/update_gitops_image_locks.py",
     ],
     "Touches database or migration state paths": [
         "backend/alembic.ini",
@@ -65,19 +58,14 @@ CRITICAL_PATH_PATTERNS = [
     ".github/actions/**",
     ".github/workflows/**",
     ".github/CODEOWNERS",
-    "aws/**",
-    "deploy/**",
     "nginx/**",
     "policies/**",
-    "terraform/**",
     "backend/alembic.ini",
     "backend/alembic/**",
     "iam/**",
     "network/**",
     "auth/**",
     "scripts/evaluate_sandbox_requirement.py",
-    "scripts/resolve_workflow_context.py",
-    "scripts/update_gitops_image_locks.py",
 ]
 
 

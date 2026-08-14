@@ -47,10 +47,10 @@ def test_ci_classifier_change_is_app_shared_and_platform() -> None:
     assert result.image_names == "backend,frontend-admin,edge-client,nginx"
 
 
-def test_infra_change_selects_infra_lane_only() -> None:
-    result = classify_paths(["terraform/main.tf"])
+def test_documentation_change_does_not_build_images() -> None:
+    result = classify_paths(["docs/repository-boundaries.md"])
 
     assert result.app_changed is False
     assert result.platform_changed is False
-    assert result.infra_changed is True
+    assert result.infra_changed is False
     assert result.image_names == ""

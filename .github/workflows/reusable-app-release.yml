@@ -2,6 +2,10 @@ name: Reusable App Release
 
 on:
   workflow_call:
+    outputs:
+      published_images:
+        description: Immutable OCI image metadata published by this release.
+        value: ${{ jobs.publish-images.outputs.published_images }}
     inputs:
       enable_github_attestations:
         required: false
@@ -27,6 +31,7 @@ jobs:
     timeout-minutes: 45
     outputs:
       matrix: ${{ steps.resolve-digests.outputs.matrix }}
+      published_images: ${{ steps.resolve-digests.outputs.published_images }}
     permissions:
       attestations: write
       contents: read
@@ -118,6 +123,7 @@ jobs:
           echo "{\"commit\": \"${IMAGE_TAG}\", \"images\": ${PUBLISHED_IMAGES}}" \
             > .artifacts/published-images.json
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "published_images=$PUBLISHED_IMAGES" >> "$GITHUB_OUTPUT"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3

@@ -13,6 +13,9 @@ inputs:
   catalog_path:
     description: "Repo-relative path to the image catalog JSON file"
     default: ".github/image-catalog.json"
+  source_root:
+    description: "Workspace-relative root of the checked-out app repository"
+    default: "."
 
 runs:
   using: composite
@@ -23,14 +26,17 @@ runs:
         IMAGE_HOST: ${{ inputs.image_host }}
         IMAGE_TAG: ${{ inputs.image_tag }}
         CATALOG: ${{ inputs.catalog_path }}
+        SOURCE_ROOT: ${{ inputs.source_root }}
       run: |
+        source_root="${SOURCE_ROOT%/}"
+        catalog="$CATALOG"
         while IFS= read -r row; do
           name=$(echo "$row" | jq -r '.name')
           repo=$(echo "$row" | jq -r '.repository')
-          dockerfile=$(echo "$row" | jq -r '.dockerfile')
-          ctx=$(echo "$row" | jq -r '.context')
+          dockerfile="$source_root/$(echo "$row" | jq -r '.dockerfile')"
+          ctx="$source_root/$(echo "$row" | jq -r '.context')"
           ref="$IMAGE_HOST/$repo:$IMAGE_TAG"
           echo "::group::Build $name → $ref"
           docker buildx build --load -t "$ref" -f "$dockerfile" "$ctx"
           echo "::endgroup::"
-        done < <(jq -c '.[]' "$CATALOG")
+        done < <(jq -c '.[]' "$catalog")

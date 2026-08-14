@@ -1,6 +1,6 @@
 # Giải Thích Thuật Ngữ Ruleset, Branch Protection Và CI
 
-Tài liệu này giải thích các thuật ngữ hay gặp khi debug GitHub Rulesets, Branch Protection và CI checks trong repo `Face_dectector`.
+Tài liệu này giải thích các thuật ngữ hay gặp khi debug GitHub Rulesets, Branch Protection và CI checks trong repo `face-detector-app`.
 
 ## 1. Nhóm Khái Niệm Nền Tảng
 
@@ -31,7 +31,7 @@ Status check là kết quả kiểm tra gắn vào commit hoặc PR.
 Ví dụ:
 
 ```text
-CI Gateway / gateway
+CI / gateway
 Sandbox Policy / evaluate
 Repo Security / secret-scan
 ```
@@ -43,20 +43,20 @@ Required status check là check bắt buộc phải pass trước khi merge.
 Trong repo này, context quan trọng nhất nên require là:
 
 ```text
-CI Gateway / gateway
+CI / gateway
 ```
 
 ### Context Name
 
 Context name là tên chính xác của check mà ruleset dùng để so khớp.
 
-Tên này phải match exact. Nếu ruleset require `CI Gateway / gateway` nhưng workflow thật report `gateway`, GitHub sẽ chờ một check không bao giờ xuất hiện.
+Tên này phải khớp chính xác. Nếu ruleset require `CI Gateway / gateway` nhưng workflow thật report `CI / gateway`, GitHub sẽ chờ một check không bao giờ xuất hiện.
 
 ### Check Run
 
 Check run là một lần chạy của một job.
 
-Ví dụ: job `gateway` trong workflow `CI Gateway`.
+Ví dụ: job `gateway` trong workflow `CI`.
 
 ### Check Suite
 
@@ -169,7 +169,7 @@ Nguyên nhân thường gặp:
 Xác minh bằng:
 
 ```powershell
-gh pr checks <pr-number> --repo chiendz11/Face_dectector
+gh pr checks <pr-number> --repo chiendz11/face-detector-app
 ```
 
 ### Pending Không Đồng Nghĩa Fail
@@ -180,30 +180,30 @@ gh pr checks <pr-number> --repo chiendz11/Face_dectector
 
 Job skipped có thể là đúng nếu changed path không thuộc domain của job đó.
 
-Vì vậy branch protection nên require `CI Gateway / gateway`, không require từng job domain như backend/frontend/edge/nginx.
+Vì vậy branch protection nên require `CI / gateway`, không require từng job domain như backend/frontend/edge/nginx.
 
 ## 7. Mapping Nhanh Cho Repo
 
-- Required check chính: `CI Gateway / gateway`
+- Required check chính: `CI / gateway`
 - App lane: `verify-app`
-- Platform lane: `verify-platform`
-- Infra lane: `verify-infra`
 - Sandbox policy: `Sandbox Policy / evaluate`
 - Secret scan: `Repo Security / secret-scan`
 - Final gate: `gateway`
+
+Infra và GitOps có gateway riêng trong repository tương ứng; không require check của repo khác trên app PR.
 
 ## 8. Checklist Debug Pending Lâu
 
 1. Xem trạng thái backend checks:
 
 ```powershell
-gh pr checks <pr-number> --repo chiendz11/Face_dectector
+gh pr checks <pr-number> --repo chiendz11/face-detector-app
 ```
 
 2. Xem rollup và merge state:
 
 ```powershell
-gh pr view <pr-number> --repo chiendz11/Face_dectector --json statusCheckRollup,mergeStateStatus
+gh pr view <pr-number> --repo chiendz11/face-detector-app --json statusCheckRollup,mergeStateStatus
 ```
 
 3. Nếu nghi required context sai, xem check-runs của head SHA:

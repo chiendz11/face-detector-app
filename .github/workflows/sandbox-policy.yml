@@ -15,22 +15,15 @@ on:
     types:
       - submitted
       - edited
-  workflow_run:
-    workflows:
-      - Sandbox Auto Apply
-    types:
-      - completed
-
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_run' && format('sandbox-policy-{0}', github.event.workflow_run.head_sha) || format('sandbox-policy-{0}', github.event.pull_request.number || github.ref) }}
+  group: sandbox-policy-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   evaluate:
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -41,7 +34,7 @@ jobs:
     steps:
       - name: Resolve PR context
         id: pr_context
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             async function fetchPullRequest(number) {
@@ -102,7 +95,7 @@ jobs:
 
       - name: Materialize sandbox policy event
         if: steps.pr_context.outputs.should_run == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           PR_NUMBER: ${{ steps.pr_context.outputs.pr_number }}
         with:
@@ -140,7 +133,7 @@ jobs:
       - name: Get PR approvals
         if: steps.pr_context.outputs.should_run == 'true'
         id: approvals
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const pr = await github.rest.pulls.get({
@@ -166,9 +159,10 @@ jobs:
       - name: Resolve trusted governance labels
         if: steps.pr_context.outputs.should_run == 'true'
         id: trusted_labels
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           PR_NUMBER: ${{ steps.pr_context.outputs.pr_number }}
+          INFRA_AUTOMATION_BOT_LOGIN: ${{ vars.INFRA_AUTOMATION_BOT_LOGIN || '' }}
         with:
           script: |
             const fs = require('fs');
@@ -188,9 +182,9 @@ jobs:
             const presentLabels = new Set((pr.labels || []).map(l => l.name));
             const repoOwner = context.repo.owner;
             const botUsers = new Set(['github-actions[bot]', 'dependabot[bot]']);
-            const systemUsers = new Set(['github-actions[bot]']);
             const humanTrustedLabels = new Set(['allow-self-approve', 'deploy-sandbox', 'deploy-preview', 'skip-sandbox-approved']);
-            const systemTrustedLabels = new Set(['sandbox-validated', 'sandbox-recommended', 'sandbox-required', 'ready-for-deploy']);
+            const localPolicyLabels = new Set(['sandbox-recommended', 'sandbox-required', 'ready-for-deploy']);
+            const infraAutomationBot = String(process.env.INFRA_AUTOMATION_BOT_LOGIN || '').trim();
             const trackedLabels = [
               'allow-self-approve',
               'deploy-sandbox',
@@ -234,7 +228,8 @@ jobs:
               const freshForHead = !headCommittedAt || !labeledAt || Date.parse(labeledAt) >= Date.parse(headCommittedAt);
               const trusted = presentLabels.has(label) && (
                 (humanTrustedLabels.has(label) && actor === repoOwner && !botUsers.has(actor)) ||
-                (systemTrustedLabels.has(label) && systemUsers.has(actor) && freshForHead)
+                (localPolicyLabels.has(label) && actor === 'github-actions[bot]' && freshForHead) ||
+                (label === 'sandbox-validated' && infraAutomationBot && actor === infraAutomationBot && freshForHead)
               );
               trust[label] = {
                 present: presentLabels.has(label),
@@ -377,14 +372,14 @@ jobs:
 
       - name: Upload sandbox-policy report
         if: ${{ always() && steps.pr_context.outputs.should_run == 'true' && hashFiles('.artifacts/sandbox-policy/report.json') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sandbox-policy-report
           path: .artifacts/sandbox-policy/
 
       - name: Mark ready-for-deploy (bot)
         if: ${{ always() && steps.pr_context.outputs.should_run == 'true' && hashFiles('.artifacts/sandbox-policy/report.json') != '' && github.event_name != 'workflow_run' && steps.pr_context.outputs.same_repo == 'true' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           PR_NUMBER: ${{ steps.pr_context.outputs.pr_number }}
           HEAD_SHA: ${{ steps.pr_context.outputs.head_sha }}
@@ -408,10 +403,7 @@ jobs:
 
             const workflowPolicies = [
               { file: 'repo-security.yml', label: 'Repo Security', event: 'pull_request', always: true },
-              { file: 'app-ci.yml', label: 'App CI', event: 'pull_request', always: false },
-              { file: 'infra-ci.yml', label: 'Infra CI', event: 'pull_request', always: false },
-              { file: 'platform-ci.yml', label: 'Platform CI', event: 'pull_request', always: false },
-              { file: 'terraform-plan.yml', label: 'Terraform PR Plan', event: 'pull_request_target', always: false },
+              { file: 'ci.yml', label: 'CI', event: 'pull_request', always: true },
             ];
             const successConclusions = new Set(['success', 'neutral', 'skipped']);
 

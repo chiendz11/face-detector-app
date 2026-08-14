@@ -7,7 +7,7 @@ Repo này dùng `CODEOWNERS` và custom policy checks như một lớp metadata/
 Nên require các check sau trên `master`:
 
 ```text
-CI Gateway / gateway
+CI / gateway
 Sandbox Policy / evaluate
 Repo Security / secret-scan
 ```
@@ -59,7 +59,7 @@ Nên dùng lane theo domain phía sau một gateway chung:
 Branch protection nên require aggregator ổn định:
 
 ```text
-CI Gateway / gateway
+CI / gateway
 ```
 
 Không nên require trực tiếp từng job domain, vì các job đó có thể skipped khi path tương ứng không đổi. Required check bị skipped/missing có thể làm PR pending hoặc blocked sai.
