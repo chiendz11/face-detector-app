@@ -1,0 +1,63 @@
+name: Production Promotion Request
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release commit and immutable digests
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REGISTRY_USERNAME: ${{ secrets.GHCR_USERNAME || github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GHCR_TOKEN || github.token }}
+        run: |
+          source_sha=$(git rev-list -n 1 "$RELEASE_TAG")
+          owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "backend_digest=$(python scripts/resolve_registry_digest.py --repository "$owner/face-detector-backend" --reference "$source_sha" --username "$REGISTRY_USERNAME" --password "$REGISTRY_PASSWORD")" >> "$GITHUB_OUTPUT"
+          echo "frontend_digest=$(python scripts/resolve_registry_digest.py --repository "$owner/face-detector-admin" --reference "$source_sha" --username "$REGISTRY_USERNAME" --password "$REGISTRY_PASSWORD")" >> "$GITHUB_OUTPUT"
+          echo "nginx_digest=$(python scripts/resolve_registry_digest.py --repository "$owner/face-detector-nginx" --reference "$source_sha" --username "$REGISTRY_USERNAME" --password "$REGISTRY_PASSWORD")" >> "$GITHUB_OUTPUT"
+
+      - name: Mint GitOps automation token
+        id: gitops-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.GITOPS_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.GITOPS_DISPATCH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ vars.GITOPS_REPOSITORY_NAME || 'face-detector-gitops' }}
+
+      - name: Dispatch production promotion
+        env:
+          GH_TOKEN: ${{ steps.gitops-token.outputs.token }}
+          GITOPS_REPOSITORY: ${{ vars.GITOPS_REPOSITORY || format('{0}/face-detector-gitops', github.repository_owner) }}
+          SOURCE_SHA: ${{ steps.release.outputs.source_sha }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          BACKEND_DIGEST: ${{ steps.release.outputs.backend_digest }}
+          FRONTEND_DIGEST: ${{ steps.release.outputs.frontend_digest }}
+          NGINX_DIGEST: ${{ steps.release.outputs.nginx_digest }}
+        run: |
+          jq -n \
+            --arg source_repository "$GITHUB_REPOSITORY" \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg release_tag "$RELEASE_TAG" \
+            --arg image_tag "$SOURCE_SHA" \
+            --arg backend_digest "$BACKEND_DIGEST" \
+            --arg frontend_digest "$FRONTEND_DIGEST" \
+            --arg nginx_digest "$NGINX_DIGEST" \
+            '{event_type:"promote-production-v1",client_payload:{source_repository:$source_repository,source_sha:$source_sha,release_tag:$release_tag,image_tag:$image_tag,backend_digest:$backend_digest,frontend_digest:$frontend_digest,nginx_digest:$nginx_digest}}' \
+            | gh api --method POST "repos/$GITOPS_REPOSITORY/dispatches" --input -

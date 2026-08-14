@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import unittest
 from pathlib import Path
 
 import yaml
@@ -9,89 +8,50 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def load_yaml(path: Path) -> dict[str, object]:
+def load_yaml(path: Path) -> dict:
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     if True in document and "on" not in document:
         document["on"] = document.pop(True)
     return document
 
 
-class WorkflowGovernancePolicyTest(unittest.TestCase):
-    def test_trust_boundary_exception_schema_exists(self) -> None:
-        data = load_yaml(REPO_ROOT / "policies/data/exceptions.yaml")
-        github_exceptions = data["exceptions"]["github"]
+def test_ci_exposes_one_stable_gateway() -> None:
+    workflow = load_yaml(REPO_ROOT / ".github/workflows/ci.yml")
 
-        self.assertIn("trust_boundary_changes", github_exceptions)
-        self.assertIsInstance(github_exceptions["trust_boundary_changes"], list)
-
-        for entry in github_exceptions["trust_boundary_changes"]:
-            self.assertIsInstance(entry.get("rule"), str)
-            self.assertTrue(entry["rule"])
-            self.assertIsInstance(entry.get("workflow"), str)
-            self.assertTrue(entry["workflow"])
-            self.assertIsInstance(entry.get("reason"), str)
-            self.assertTrue(entry["reason"])
-            self.assertIsInstance(entry.get("expires_on"), str)
-
-    def test_trusted_parent_workflows_keep_pull_request_target(self) -> None:
-        trusted_workflows = {
-            ".github/workflows/sandbox-auto-apply.yml": "Sandbox Auto Apply",
-            ".github/workflows/sandbox-auto-destroy.yml": "Sandbox Auto Destroy",
-            ".github/workflows/terraform-plan.yml": "Terraform PR Plan",
-        }
-
-        for relative_path, expected_name in trusted_workflows.items():
-            workflow = load_yaml(REPO_ROOT / relative_path)
-            self.assertEqual(workflow["name"], expected_name)
-            self.assertIn("pull_request_target", workflow["on"])
-            self.assertNotIn("pull_request", workflow["on"])
-
-    def test_platform_ci_enforces_workflow_governance_policy(self) -> None:
-        workflow = load_yaml(REPO_ROOT / ".github/workflows/reusable-platform-ci.yml")
-        steps = workflow["jobs"]["platform-validate"]["steps"]
-
-        validate_step = next(
-            step for step in steps if step.get("name") == "Validate GitHub workflow governance"
-        )
-        self.assertIn("conftest test", validate_step["run"])
-        self.assertIn("--policy policies/github/workflows", validate_step["run"])
-        self.assertIn("--data policies/data", validate_step["run"])
-
-    def test_nginx_public_service_exception_allows_http_and_https_only(self) -> None:
-        data = load_yaml(REPO_ROOT / "policies/data/exceptions.yaml")
-        public_services = data["exceptions"]["kubernetes"]["public_services"]
-
-        nginx_exception = next(
-            entry for entry in public_services if entry["resource_name"] == "nginx"
-        )
-
-        self.assertEqual(nginx_exception["service_types"], ["LoadBalancer"])
-        self.assertEqual(nginx_exception["allowed_ports"], [80, 443])
-        self.assertTrue(nginx_exception["allow_internet_facing"])
-
-    def test_sandbox_workflow_run_can_apply_after_trusted_gate(self) -> None:
-        workflow = load_yaml(REPO_ROOT / ".github/workflows/sandbox-auto-apply.yml")
-        jobs = workflow["jobs"]
-
-        self.assertIn("workflow_run", workflow["on"])
-
-        signal_job = jobs["signal-apply-ready"]
-        self.assertIn("github.event_name == 'workflow_run'", signal_job["if"])
-        self.assertEqual(signal_job["permissions"]["issues"], "write")
-        signal_script = signal_job["steps"][0]["with"]["script"]
-        self.assertIn("removeLabel", signal_script)
-        self.assertIn("addLabels", signal_script)
-        self.assertIn("ready-for-deploy", signal_script)
-
-        for job_name in ("apply-infrastructure", "bootstrap-sandbox", "mark-sandbox-validated"):
-            self.assertIn("needs.evaluate-policy.outputs.should_apply == 'true'", jobs[job_name]["if"])
-            self.assertNotIn("github.event_name == 'pull_request_target'", jobs[job_name]["if"])
-
-        gate_script = jobs["evaluate-policy"]["steps"][-1]["with"]["script"]
-        self.assertIn("report.autoApplyEligible", gate_script)
-        self.assertIn("report.deployLabelTrusted", gate_script)
-        self.assertIn("evaluateWorkflowGates(pr.head.sha)", gate_script)
+    assert "pull_request" in workflow["on"]
+    assert "gateway" in workflow["jobs"]
+    assert "verify-app" in workflow["jobs"]
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_sandbox_dispatch_is_trusted_and_has_no_aws_permission() -> None:
+    workflow = load_yaml(REPO_ROOT / ".github/workflows/sandbox-dispatch.yml")
+    permissions = workflow["permissions"]
+
+    assert "pull_request_target" in workflow["on"]
+    assert "id-token" not in permissions
+    assert permissions == {"contents": "read"}
+
+
+def test_sandbox_image_build_is_isolated_from_registry_credentials() -> None:
+    workflow = load_yaml(REPO_ROOT / ".github/workflows/sandbox-image-publish.yml")
+    build_job = workflow["jobs"]["build-untrusted-source"]
+    publish_job = workflow["jobs"]["publish"]
+
+    assert build_job["permissions"] == {"contents": "read"}
+    assert "packages" not in build_job["permissions"]
+    assert publish_job["permissions"]["packages"] == "write"
+    assert publish_job["needs"] == "build-untrusted-source"
+
+
+def test_app_release_dispatches_immutable_metadata_to_gitops() -> None:
+    text = (REPO_ROOT / ".github/workflows/app-release.yml").read_text(encoding="utf-8")
+
+    assert "promote-staging-v1" in text
+    assert "published_images" in text
+    assert "GITOPS_DISPATCH_APP_PRIVATE_KEY" in text
+
+
+def test_repository_contains_no_terraform_or_argocd_desired_state() -> None:
+    assert not (REPO_ROOT / "terraform").exists()
+    assert not (REPO_ROOT / "deploy" / "argocd").exists()
+    assert not (REPO_ROOT / "deploy" / "helm").exists()

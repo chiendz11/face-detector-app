@@ -38,3 +38,39 @@ jobs:
       registry_org: ${{ github.repository_owner }}
       image_tag: ${{ github.sha }}
     secrets: inherit
+
+  request-staging-promotion:
+    needs: publish
+    if: needs.publish.outputs.published_images != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Mint GitOps automation token
+        id: gitops-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.GITOPS_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.GITOPS_DISPATCH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ vars.GITOPS_REPOSITORY_NAME || 'face-detector-gitops' }}
+
+      - name: Dispatch immutable staging promotion
+        env:
+          GH_TOKEN: ${{ steps.gitops-token.outputs.token }}
+          GITOPS_REPOSITORY: ${{ vars.GITOPS_REPOSITORY || format('{0}/face-detector-gitops', github.repository_owner) }}
+          PUBLISHED_IMAGES: ${{ needs.publish.outputs.published_images }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          backend_digest=$(jq -r '.[] | select(.name == "backend") | .digest' <<< "$PUBLISHED_IMAGES")
+          frontend_digest=$(jq -r '.[] | select(.name == "frontend-admin") | .digest' <<< "$PUBLISHED_IMAGES")
+          nginx_digest=$(jq -r '.[] | select(.name == "nginx") | .digest' <<< "$PUBLISHED_IMAGES")
+          jq -n \
+            --arg source_repository "$GITHUB_REPOSITORY" \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg image_tag "$SOURCE_SHA" \
+            --arg backend_digest "$backend_digest" \
+            --arg frontend_digest "$frontend_digest" \
+            --arg nginx_digest "$nginx_digest" \
+            '{event_type:"promote-staging-v1",client_payload:{source_repository:$source_repository,source_sha:$source_sha,image_tag:$image_tag,backend_digest:$backend_digest,frontend_digest:$frontend_digest,nginx_digest:$nginx_digest}}' \
+            | gh api --method POST "repos/$GITOPS_REPOSITORY/dispatches" --input -

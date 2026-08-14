@@ -1,0 +1,101 @@
+name: Sandbox Request
+
+on:
+  pull_request_target:
+    branches:
+      - master
+    types:
+      - labeled
+      - closed
+
+permissions:
+  contents: read
+
+jobs:
+  publish-images:
+    if: >-
+      github.event.action == 'labeled' &&
+      (github.event.label.name == 'deploy-sandbox' || github.event.label.name == 'deploy-preview') &&
+      github.actor == github.repository_owner &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/sandbox-image-publish.yml
+    with:
+      source_sha: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit
+
+  dispatch-apply:
+    needs: publish-images
+    if: needs.publish-images.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint infrastructure dispatcher token
+        id: infra-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.INFRA_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.INFRA_DISPATCH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ vars.INFRA_REPOSITORY_NAME || 'face-detector-infra' }}
+
+      - name: Dispatch immutable sandbox apply request
+        env:
+          GH_TOKEN: ${{ steps.infra-token.outputs.token }}
+          INFRA_REPOSITORY: ${{ vars.INFRA_REPOSITORY || format('{0}/face-detector-infra', github.repository_owner) }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          BACKEND_DIGEST: ${{ needs.publish-images.outputs.backend_digest }}
+          FRONTEND_DIGEST: ${{ needs.publish-images.outputs.frontend_digest }}
+          NGINX_DIGEST: ${{ needs.publish-images.outputs.nginx_digest }}
+        run: |
+          jq -n \
+            --arg source_repository "$GITHUB_REPOSITORY" \
+            --argjson pull_request_number "$PR_NUMBER" \
+            --arg source_ref_name "$PR_HEAD_REF" \
+            --arg source_git_sha "$PR_HEAD_SHA" \
+            --arg owner_login "$PR_AUTHOR" \
+            --arg requested_by "$GITHUB_ACTOR" \
+            --arg image_tag "$PR_HEAD_SHA" \
+            --arg backend_digest "$BACKEND_DIGEST" \
+            --arg frontend_digest "$FRONTEND_DIGEST" \
+            --arg nginx_digest "$NGINX_DIGEST" \
+            '{event_type:"sandbox-apply-v1",client_payload:{source_repository:$source_repository,pull_request_number:$pull_request_number,source_ref_name:$source_ref_name,source_git_sha:$source_git_sha,owner_login:$owner_login,requested_by:$requested_by,image_tag:$image_tag,backend_digest:$backend_digest,frontend_digest:$frontend_digest,nginx_digest:$nginx_digest}}' \
+            | gh api --method POST "repos/$INFRA_REPOSITORY/dispatches" --input -
+
+  dispatch-destroy:
+    if: >-
+      github.event.action == 'closed' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'teardown-sandbox' && github.actor == github.repository_owner)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint infrastructure dispatcher token
+        id: infra-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.INFRA_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.INFRA_DISPATCH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ vars.INFRA_REPOSITORY_NAME || 'face-detector-infra' }}
+
+      - name: Dispatch sandbox destroy request
+        env:
+          GH_TOKEN: ${{ steps.infra-token.outputs.token }}
+          INFRA_REPOSITORY: ${{ vars.INFRA_REPOSITORY || format('{0}/face-detector-infra', github.repository_owner) }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          jq -n \
+            --arg source_repository "$GITHUB_REPOSITORY" \
+            --argjson pull_request_number "$PR_NUMBER" \
+            --arg source_ref_name "$PR_HEAD_REF" \
+            --arg source_git_sha "$PR_HEAD_SHA" \
+            --arg owner_login "$PR_AUTHOR" \
+            --arg requested_by "$GITHUB_ACTOR" \
+            '{event_type:"sandbox-destroy-v1",client_payload:{source_repository:$source_repository,pull_request_number:$pull_request_number,source_ref_name:$source_ref_name,source_git_sha:$source_git_sha,owner_login:$owner_login,requested_by:$requested_by}}' \
+            | gh api --method POST "repos/$INFRA_REPOSITORY/dispatches" --input -

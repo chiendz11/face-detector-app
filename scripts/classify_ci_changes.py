@@ -15,7 +15,7 @@ APP_SHARED_EXACT = {
     "docker-compose.dev.yml",
     "docker-compose.edge.yml",
     ".github/image-catalog.json",
-    ".github/workflows/app-ci.yml",
+    ".github/workflows/ci.yml",
     ".github/workflows/reusable-app-ci.yml",
     "scripts/classify_ci_changes.py",
     "scripts/ci-e2e-test.sh",
@@ -34,15 +34,11 @@ PLATFORM_EXACT = {
     ".github/CODEOWNERS",
     ".github/dependabot.yml",
     "scripts/classify_ci_changes.py",
-    "scripts/cleanup_sandbox_aws_orphans.py",
     "scripts/ci-e2e-test.sh",
     "scripts/ci-integration-test.sh",
     "scripts/evaluate_sandbox_requirement.py",
-    "scripts/generate-env-from-ssm.sh",
     "scripts/render_sandbox_status_comment.py",
     "scripts/resolve_registry_digest.py",
-    "scripts/resolve_workflow_context.py",
-    "scripts/update_gitops_image_locks.py",
 }
 
 PLATFORM_PREFIXES = (
@@ -52,20 +48,9 @@ PLATFORM_PREFIXES = (
     "scripts/tests/",
 )
 
-INFRA_EXACT = {
-    "scripts/resolve_workflow_context.py",
-}
+INFRA_EXACT: set[str] = set()
 
-INFRA_PREFIXES = (
-    ".github/actions/setup-conftest/",
-    ".github/workflows/infra-",
-    ".github/workflows/reusable-infra-",
-    "deploy/",
-    "policies/data/",
-    "policies/kubernetes/",
-    "policies/terraform/",
-    "terraform/",
-)
+INFRA_PREFIXES: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

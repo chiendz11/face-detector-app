@@ -1,87 +1,54 @@
-# Playbook Chuyển Sang GitHub Rulesets Enterprise
+# Playbook GitHub Ruleset Cho App Repository
 
-Playbook này mô tả cách chuyển enforcement từ branch protection cũ sang GitHub Rulesets. Mục tiêu là tách rule cho workflow/policy changes khỏi rule cho app changes.
+## Mục Tiêu
 
-## Phạm Vi
-
-- Branch mục tiêu: `master`, `main`, `production`
-- Required check chung: `CI Gateway / gateway`
-- Control plane do CODEOWNERS quản lý: `.github/workflows/**`, `.github/actions/**`, `policies/**`
-
-## Giai Đoạn 1: Rulesets
-
-Tạo hai branch ruleset. Bypass chỉ dành cho emergency break-glass identities.
-
-### 1. Ruleset Bảo Mật Cao Cho Workflow Và Policy
-
-Khuyến nghị:
-
-- Target refs: `refs/heads/master`, `refs/heads/main`, `refs/heads/production`
-- File conditions: `.github/workflows/**`, `.github/actions/**`, `policies/**`, `.github/CODEOWNERS`
-- Require pull request before merging: bật
-- Required approvals: `1`
-- Require code owner review: bật nếu có ít nhất hai trusted humans
-- Dismiss stale reviews: bật
-- Require approval of the most recent reviewable push: bật
-- Require conversation resolution: bật
-- Restrict deletions: bật
-- Required status checks: `CI Gateway / gateway`
-- Bypass list: chỉ emergency identities
-
-Với solo maintainer, có thể tắt native code owner review để tránh tự block. Khi có thêm reviewer tin cậy, bật lại.
-
-### 2. Ruleset Cho Luồng Phát Triển App Code
-
-Khuyến nghị:
-
-- Target refs: `refs/heads/master`, `refs/heads/main`, `refs/heads/production`
-- File conditions: `backend/**`, `frontend-admin/**`, `edge-client/**`, `nginx/**`, runtime app files
-- Require pull request before merging: bật
-- Required approvals: tùy team; solo maintainer có thể để `0`
-- Dismiss stale reviews: bật nếu có review thật
-- Require conversation resolution: bật
-- Required status checks: `CI Gateway / gateway`
-
-## Giai Đoạn 2: CI Gateway
-
-Dùng một workflow tổng hợp luôn chạy trên PR. Workflow này quyết định lane nào cần chạy dựa trên changed paths.
-
-File đã implement:
+Ruleset bảo vệ `master` nhưng không require trực tiếp các job theo domain vì backend, frontend,
+edge hoặc nginx có thể được skip. Required context ổn định của repo này là:
 
 ```text
-.github/workflows/ci-gateway.yml
+CI / gateway
+Sandbox Policy / evaluate
+Repo Security / secret-scan
 ```
 
-Hành vi:
+## Rule Cho Master
 
-- App paths thay đổi: chạy reusable app verification lane.
-- Platform/workflow/policy paths thay đổi: chạy reusable platform governance lane.
-- Infra paths thay đổi: chạy reusable infra verification lane.
-- Luôn emit kết quả cuối cùng dưới context `CI Gateway / gateway`.
+- Require pull request before merging: bật.
+- Required approving reviews: `0` khi chỉ có một maintainer.
+- Require code owner review native: tắt trong giai đoạn solo.
+- Require status checks: ba context ở trên.
+- Require branch up to date: bật nếu merge queue/CI capacity đáp ứng được.
+- Restrict direct push và deletion: bật.
+- Allow auto-merge: bật sau khi checks pass.
+- Bypass: chỉ owner/break-glass identity, mọi lần dùng phải ghi lý do.
 
-Cách này tránh tình trạng required check bị pending mãi vì job/domain tương ứng bị skip.
+`CODEOWNERS` vẫn là metadata cho custom governance, không phải native review gate trong chế độ
+solo maintainer.
 
-## Giai Đoạn 3: Tách Trách Nhiệm
+## Lane-Based CI
 
-Repo hiện tại là solo-maintainer. Khi cần audit-grade SoD thật sự, nên chuyển owner sang team identities:
+Workflow `.github/workflows/ci.yml` phân loại changed paths rồi gọi reusable app CI:
 
-```text
-* @org/developers
-.github/workflows/ @org/devops-leads
-policies/ @org/security-team
-docs/ @org/technical-writers
-```
+- `backend/**`: backend test/security/image checks;
+- `frontend-admin/**`: frontend test/build/audit;
+- `edge-client/**`: edge test/image checks;
+- `nginx/**`: nginx image checks;
+- compose, image catalog và shared workflow/action: chạy broader app verification.
 
-Ít nhất hai trusted humans nên có quyền review workflow/policy changes.
+Job `gateway` luôn chạy với `if: always()` và fail nếu classifier hoặc lane bắt buộc fail. Vì vậy
+ruleset chỉ cần require `CI / gateway`, không chờ một domain job không được tạo.
 
-## Checklist Vận Hành
+## Workflow Và Policy Changes
 
-1. Bật Secret Scanning và Push Protection trong repository settings.
-2. Tạo hai Rulesets như trên.
-3. Chuyển required checks từ branch protection sang rulesets.
-4. Set `CI Gateway / gateway` là required status check trong cả hai rulesets.
-5. Giữ emergency bypass nhỏ nhất có thể và ghi lý do.
-6. Test bằng ba PR:
-   - docs-only PR
-   - app-code PR
-   - workflow/policy PR
+Các path `.github/workflows/**`, `.github/actions/**`, `policies/**` và `CODEOWNERS` phải chạy
+Repo Security cùng governance tests. Khi có ít nhất hai trusted humans, có thể thêm ruleset riêng
+yêu cầu một approval cho các path control-plane này.
+
+## Checklist Cutover
+
+1. Merge migration PR sau khi review.
+2. Bật Secret Scanning và Push Protection.
+3. Tạo ruleset cho `master` với đúng context name.
+4. Không copy AWS secrets/roles vào app repo.
+5. Cấu hình GitHub Apps cross-repo theo `docs/repository-boundaries.md`.
+6. Bật Actions và thử lần lượt docs-only PR, single-domain PR, shared-app PR và sandbox PR.

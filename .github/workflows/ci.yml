@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+  security-events: write
+
+concurrency:
+  group: app-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app_changed: ${{ steps.classify.outputs.app_changed }}
+      backend_changed: ${{ steps.classify.outputs.backend_changed }}
+      frontend_admin_changed: ${{ steps.classify.outputs.frontend_admin_changed }}
+      edge_client_changed: ${{ steps.classify.outputs.edge_client_changed }}
+      nginx_changed: ${{ steps.classify.outputs.nginx_changed }}
+      app_shared_changed: ${{ steps.classify.outputs.app_shared_changed }}
+      control_plane_changed: ${{ steps.classify.outputs.platform_changed }}
+      image_names: ${{ steps.classify.outputs.image_names }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify application lanes
+        id: classify
+        shell: bash
+        run: |
+          git diff --name-only \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" > .changed-files
+          python scripts/classify_ci_changes.py \
+            --changed-files .changed-files \
+            --github-output "$GITHUB_OUTPUT"
+
+  verify-app:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.app_changed == 'true'
+    uses: ./.github/workflows/reusable-app-ci.yml
+    with:
+      registry_org: ${{ github.repository_owner }}
+      image_tag: ${{ github.event.pull_request.head.sha }}
+      run_backend: ${{ needs.detect-changes.outputs.app_shared_changed == 'true' || needs.detect-changes.outputs.backend_changed == 'true' }}
+      run_frontend_admin: ${{ needs.detect-changes.outputs.app_shared_changed == 'true' || needs.detect-changes.outputs.frontend_admin_changed == 'true' }}
+      run_edge_client: ${{ needs.detect-changes.outputs.app_shared_changed == 'true' || needs.detect-changes.outputs.edge_client_changed == 'true' }}
+      run_nginx: ${{ needs.detect-changes.outputs.app_shared_changed == 'true' || needs.detect-changes.outputs.nginx_changed == 'true' }}
+      run_app_security: ${{ needs.detect-changes.outputs.app_shared_changed == 'true' || needs.detect-changes.outputs.backend_changed == 'true' || needs.detect-changes.outputs.frontend_admin_changed == 'true' || needs.detect-changes.outputs.edge_client_changed == 'true' }}
+      run_docker_images: ${{ needs.detect-changes.outputs.image_names != '' }}
+      run_smoke_e2e: ${{ needs.detect-changes.outputs.app_shared_changed == 'true' }}
+      image_names: ${{ needs.detect-changes.outputs.image_names }}
+    secrets: inherit
+
+  verify-control-plane:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.control_plane_changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Lint GitHub Actions workflows
+        run: |
+          docker run --rm \
+            -v "${PWD}:/workdir" \
+            -w /workdir \
+            rhysd/actionlint:1.7.8
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Run application control-plane contracts
+        run: |
+          python -m pip install pytest pyyaml
+          python -m pytest scripts/tests -q
+
+  gateway:
+    runs-on: ubuntu-latest
+    needs:
+      - detect-changes
+      - verify-app
+      - verify-control-plane
+    if: always()
+    steps:
+      - name: Enforce application lane result
+        shell: bash
+        env:
+          DETECT_RESULT: ${{ needs.detect-changes.result }}
+          APP_CHANGED: ${{ needs.detect-changes.outputs.app_changed }}
+          APP_RESULT: ${{ needs.verify-app.result }}
+          CONTROL_PLANE_CHANGED: ${{ needs.detect-changes.outputs.control_plane_changed }}
+          CONTROL_PLANE_RESULT: ${{ needs.verify-control-plane.result }}
+        run: |
+          if [ "$DETECT_RESULT" != "success" ]; then
+            echo "Change classification failed: $DETECT_RESULT" >&2
+            exit 1
+          fi
+          if [ "$APP_CHANGED" = "true" ] && [ "$APP_RESULT" != "success" ]; then
+            echo "Application verification failed: $APP_RESULT" >&2
+            exit 1
+          fi
+          if [ "$CONTROL_PLANE_CHANGED" = "true" ] && [ "$CONTROL_PLANE_RESULT" != "success" ]; then
+            echo "Application control-plane verification failed: $CONTROL_PLANE_RESULT" >&2
+            exit 1
+          fi
+          echo "Application CI gateway passed."

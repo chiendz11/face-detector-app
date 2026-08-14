@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+from scripts.classify_ci_changes import classify_paths
+
 from scripts.check_dependency_licenses import compile_policy, evaluate_inventory_document
 
 
@@ -192,16 +194,10 @@ class DependencyLicensePolicyTest(unittest.TestCase):
         )
         self.assertNotIn("enrollment", evaluate_step["run"])
 
-    def test_platform_ci_detects_license_contract_changes(self) -> None:
-        workflow_path = REPO_ROOT / ".github/workflows/reusable-platform-ci.yml"
-        workflow_text = workflow_path.read_text(encoding="utf-8")
+    def test_license_policy_changes_are_part_of_application_control_plane(self) -> None:
+        result = classify_paths(["policies/licenses/policy.json"])
 
-        self.assertIn("reusable-app-ci", workflow_text)
-        self.assertIn("policies/licenses/policy\\.json", workflow_text)
-        self.assertIn(
-            "scripts/(check_dependency_licenses|evaluate_sandbox_requirement|update_gitops_image_locks)",
-            workflow_text,
-        )
+        self.assertTrue(result.platform_changed)
 
 if __name__ == "__main__":
     unittest.main()
