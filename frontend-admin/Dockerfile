@@ -15,7 +15,7 @@ COPY package.json package-lock.json ./
 COPY . .
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM nginxinc/nginx-unprivileged:1.30-alpine
 
 USER root
 
