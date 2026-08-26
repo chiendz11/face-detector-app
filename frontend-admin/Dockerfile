@@ -1,11 +1,11 @@
-FROM node:20-bookworm-slim AS deps
+FROM node:25-bookworm-slim AS deps
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci --include=optional
 
-FROM node:20-bookworm-slim AS build
+FROM node:25-bookworm-slim AS build
 
 WORKDIR /app
 
